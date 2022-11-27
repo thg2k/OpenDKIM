@@ -12117,6 +12117,12 @@ mlfi_eoh(SMFICTX *ctx)
 			       dfc->mctx_jobid, host,
 			       mtaname == NULL ? "?" : mtaname);
 		}
+		else if (originok && status == 0 && conf->conf_logwhy) {
+			syslog(LOG_INFO,
+			       "%s: matched MTA name (host=%s, MTA=%s)",
+			       dfc->mctx_jobid, host,
+			       mtaname == NULL ? "?" : mtaname);
+		}
 	}
 
 	/* see if macro tests passed */
@@ -12184,53 +12190,65 @@ mlfi_eoh(SMFICTX *ctx)
 		_Bool popauth;
 #endif /* POPAUTH */
 		char *authtype;
-
-		internal = dkimf_checkhost(conf->conf_internal, cc->cctx_host);
-		internal = internal || dkimf_checkip(conf->conf_internal,
-		                                     (struct sockaddr *) &cc->cctx_ip);
+		char ipbuf[BUFRSZ];
 
 		authtype = dkimf_getsymval(ctx, "{auth_type}");
+
+		if (authtype && authtype[0]) {
+			originok = TRUE;
+
+			if (conf->conf_logwhy) {
+				syslog(LOG_INFO, "%s: authenticated with type %s",
+						dfc->mctx_jobid, authtype);
+			}
+		}
+		else {
+			if (conf->conf_logwhy) {
+				syslog(LOG_INFO, "%s: not authenticated",
+				       dfc->mctx_jobid);
+			}
+		}
+
+		internal = dkimf_checkhost(conf->conf_internal, cc->cctx_host);
+		internal = dkimf_checkip(conf->conf_internal, (struct sockaddr *) &cc->cctx_ip) || internal;
+		dkimf_ipstring(ipbuf, sizeof ipbuf, &cc->cctx_ip);
+
+		if (internal) {
+			originok = TRUE;
+
+			if (conf->conf_logwhy) {
+				syslog(LOG_INFO, "%s: %s [%s] internal",
+					dfc->mctx_jobid, cc->cctx_host,
+					ipbuf);
+			}
+		}
+		else {
+			if (conf->conf_logwhy) {
+				syslog(LOG_INFO, "%s: %s [%s] not internal",
+						dfc->mctx_jobid, cc->cctx_host,
+						ipbuf);
+			}
+		}
 
 #ifdef POPAUTH
 		popauth = dkimf_checkpopauth(popdb,
 		                             (struct sockaddr *) &cc->cctx_ip);
-#endif /* POPAUTH */
 
-		if ((authtype != NULL && authtype[0] != '\0') || internal)
+		if (popauth) {
 			originok = TRUE;
 
-#ifdef POPAUTH
-		if (popauth)
-			originok = TRUE;
-#endif /* POPAUTH */
-
-		if (!originok && conf->conf_logwhy)
-		{
-			if (!internal)
-			{
-				char ipbuf[BUFRSZ];
-
-				dkimf_ipstring(ipbuf, sizeof ipbuf,
-				               &cc->cctx_ip);
-				syslog(LOG_INFO, "%s: %s [%s] not internal",
-				       dfc->mctx_jobid, cc->cctx_host,
-				       ipbuf);
-			}
-
-			if (authtype == NULL || authtype[0] == '\0')
-			{
-				syslog(LOG_INFO, "%s: not authenticated",
+			if (conf->conf_logwhy) {
+				syslog(LOG_INFO, "%s: authenticated with POP",
 				       dfc->mctx_jobid);
 			}
-
-#ifdef POPAUTH
-			if (!popauth)
-			{
+		}
+		else {
+			if (conf->conf_logwhy) {
 				syslog(LOG_INFO, "%s: not POP authenticated",
 				       dfc->mctx_jobid);
 			}
-#endif /* POPAUTH */
 		}
+#endif /* POPAUTH */
 	}
 
 	/* is it a domain we sign for? */
